@@ -14,3 +14,6 @@ logs/
 llama.cpp/
 llama.cpp-bin/
 build/
+
+*.out
+*.env
