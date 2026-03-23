@@ -1,0 +1,73 @@
+## Tutorial simples: Rodar Claude Code 100% local (grátis)
+
+### 1. Instalar o Ollama
+
+* Baixar: [https://ollama.com](https://ollama.com)
+* Instalar normalmente
+* Verificar se está rodando:
+
+  * Abrir navegador: `http://localhost:11434`
+* O Ollama roda em segundo plano automaticamente
+
+### 2. Baixar um modelo de código
+
+Escolher conforme potência do PC:
+
+| PC    | Modelo             |
+| ----- | ------------------ |
+| Fraco | `gemma:2b`         |
+| Médio | `qwen2.5-coder:7b` |
+| Forte | `qwen3-coder:30b`  |
+
+Comando no terminal:
+
+```
+ollama pull qwen2.5-coder:7b
+```
+
+Modelos:
+
+* Gemma
+* Qwen2.5-Coder
+* Qwen3-Coder
+
+### 3. Instalar Claude Code
+
+Instalar:
+
+```
+npm install -g @anthropic-ai/claude-code
+```
+
+Software:
+
+* Claude Code
+
+### 4. Conectar Claude ao Ollama (local)
+
+Definir URL local:
+
+```
+export ANTHROPIC_BASE_URL=http://localhost:11434
+```
+
+Windows:
+
+```
+set ANTHROPIC_BASE_URL=http://localhost:11434
+```
+
+### 5. Rodar Claude local
+
+```
+claude
+```
+
+### Pronto
+
+* Sem API
+* Sem custo
+* 100% local
+* Privado
+* Funciona offline
+
