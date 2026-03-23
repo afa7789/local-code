@@ -30,6 +30,20 @@ mkdir -p "$PIDS_DIR"
 PID_FILE="$PIDS_DIR/llama.pid"
 LAST_MODEL_FILE="$PIDS_DIR/last-model.txt"
 
+prepare_log_file() {
+    mkdir -p "$PROJECT_ROOT/logs"
+
+    if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        local ts
+        ts="$(date +%Y%m%d-%H%M%S)"
+        local archived_log="$PROJECT_ROOT/logs/llama-${ts}.log"
+        mv "$LOG_FILE" "$archived_log"
+        echo "🧹 Rotated previous log to: $archived_log"
+    fi
+
+    : > "$LOG_FILE"
+}
+
 list_available_models() {
     if [ ! -d "$RESOLVED_MODELS_DIR" ]; then
         return 0
@@ -113,6 +127,14 @@ is_running() {
     fi
 }
 
+is_port_in_use() {
+    lsof -nP -iTCP:"$LLAMA_PORT" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+is_healthy() {
+    curl -sf "http://127.0.0.1:$LLAMA_PORT/health" > /dev/null 2>&1
+}
+
 status() {
     if is_running; then
         local pid
@@ -136,6 +158,8 @@ stop() {
 }
 
 start() {
+    local force_restart="${1:-false}"
+
     # ── Pre-flight checks ───────────────────────────────────────────────────────
 
     if ! command -v llama-server &> /dev/null; then
@@ -147,9 +171,33 @@ start() {
     if is_running; then
         local pid
         pid=$(cat "$PID_FILE")
-        echo "⚠️  llama.cpp is already running (PID $pid, port $LLAMA_PORT)."
-        echo "   Use '$0 stop' to stop it first, or '$0 restart' to restart."
-        exit 0
+        if is_port_in_use; then
+            if [ "$force_restart" = "true" ]; then
+                echo "🔄 Restart requested. Stopping current llama.cpp (PID $pid)..."
+                stop
+                sleep 1
+            elif is_healthy; then
+                echo "✅ llama.cpp is already running and healthy (PID $pid, port $LLAMA_PORT)."
+                return 0
+            else
+                echo "⚠️  llama.cpp is running (PID $pid) but not healthy yet. Restarting..."
+                stop
+                sleep 1
+            fi
+        fi
+
+        if [ -f "$PID_FILE" ]; then
+            echo "⚠️  Stale PID file detected (PID $pid is alive but port $LLAMA_PORT is not listening)."
+            echo "   Removing stale PID file and continuing startup..."
+            rm -f "$PID_FILE"
+        fi
+    fi
+
+    if is_port_in_use; then
+        echo "❌ Error: port $LLAMA_PORT is already in use by another process."
+        echo "=> Free the port or change LLAMA_PORT in .env"
+        lsof -nP -iTCP:"$LLAMA_PORT" -sTCP:LISTEN | tail -n +2
+        exit 1
     fi
 
     local selected_model
@@ -164,7 +212,7 @@ start() {
 
     printf "%s" "$selected_model" > "$LAST_MODEL_FILE"
 
-    mkdir -p "$PROJECT_ROOT/logs"
+    prepare_log_file
 
     # ── Launch ──────────────────────────────────────────────────────────────────
 
@@ -193,11 +241,27 @@ start() {
         --temp 0.7
     )
 
-    case "${LLAMA_FA,,}" in
+    local llama_fa_normalized
+    local llama_fa_value
+    llama_fa_normalized="$(printf '%s' "$LLAMA_FA" | tr '[:upper:]' '[:lower:]')"
+
+    case "$llama_fa_normalized" in
         true|1|yes|on)
-            llama_cmd+=( -fa )
+            llama_fa_value="on"
+            ;;
+        false|0|no|off)
+            llama_fa_value="off"
+            ;;
+        auto)
+            llama_fa_value="auto"
+            ;;
+        *)
+            echo "   ⚠️  Invalid LLAMA_FA='$LLAMA_FA'. Falling back to auto."
+            llama_fa_value="auto"
             ;;
     esac
+
+    llama_cmd+=( --flash-attn "$llama_fa_value" )
 
     "${llama_cmd[@]}" > "$LOG_FILE" 2>&1 &
 
@@ -235,9 +299,9 @@ start() {
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 case "${1:-start}" in
-    start)   start   ;;
+    start)   start false ;;
     stop)    stop    ;;
-    restart) stop; sleep 1; start ;;
+    restart) start true ;;
     status)  status  ;;
     *)
         echo "Usage: $0 {start|stop|restart|status}"
