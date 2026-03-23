@@ -23,6 +23,7 @@ LLAMA_BATCH="${LLAMA_BATCH:-256}"
 LLAMA_UBATCH="${LLAMA_UBATCH:-256}"
 LLAMA_THREADS="${LLAMA_THREADS:-8}"
 LLAMA_FA="${LLAMA_FA:-true}"
+LLAMA_REASONING_BUDGET="${LLAMA_REASONING_BUDGET:-}"
 
 LOG_FILE="$PROJECT_ROOT/logs/llama.log"
 PIDS_DIR="$PROJECT_ROOT/logs/pids"
@@ -133,6 +134,10 @@ is_port_in_use() {
 
 is_healthy() {
     curl -sf "http://127.0.0.1:$LLAMA_PORT/health" > /dev/null 2>&1
+}
+
+supports_reasoning_budget() {
+    llama-server -h 2>&1 | grep -q -- "--reasoning-budget"
 }
 
 status() {
@@ -262,6 +267,14 @@ start() {
     esac
 
     llama_cmd+=( --flash-attn "$llama_fa_value" )
+
+    if [ -n "$LLAMA_REASONING_BUDGET" ]; then
+        if supports_reasoning_budget; then
+            llama_cmd+=( --reasoning-budget "$LLAMA_REASONING_BUDGET" )
+        else
+            echo "   ⚠️  LLAMA_REASONING_BUDGET is set, but this llama-server does not support --reasoning-budget. Ignoring it."
+        fi
+    fi
 
     "${llama_cmd[@]}" > "$LOG_FILE" 2>&1 &
 
