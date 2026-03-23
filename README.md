@@ -71,16 +71,70 @@ To verify in the raw interface if the local API is online and compatible with th
 curl http://localhost:8080/v1/models
 ```
 
+## 📐 Choosing the Right Context Size (LLAMA_CTX)
+
+The context window (`LLAMA_CTX`) is the total number of tokens the model can hold in memory at once — including the system prompt, tool definitions, conversation history, and your message. Getting this wrong causes two symptoms:
+
+- **Too small** → `request (N tokens) exceeds the available context size` errors, or the client constantly compacting/summarizing the conversation
+- **Too large** → Metal OOM crashes (`kIOGPUCommandBufferCallbackErrorOutOfMemory`)
+
+### How to estimate the minimum context you need
+
+Coding assistants like OpenCode send far more than your typed message. A single request includes:
+
+| Component | Approx. tokens |
+|---|---|
+| System prompt + tool definitions | 4 000 – 10 000 |
+| Conversation history | grows over time |
+| Your message | 10 – 500 |
+| **Minimum safe floor** | **~16 000** |
+
+**Rule of thumb: start at 16 384 for coding assistants.** If you still see the "exceeds context" error, check the exact token count in the error message and set `LLAMA_CTX` to the next power of 2 above it (e.g. 24 576, 32 768).
+
+### How to check if your RAM can handle it
+
+On Apple Silicon, GPU and CPU share unified memory, so the formula is:
+
+```
+model_weights_GB + kv_cache_GB + ~2 GB OS headroom ≤ total RAM
+```
+
+Rough KV cache estimate: `LLAMA_CTX × 0.0002 GB per billion parameters`
+
+Examples for a 24 GB M4:
+
+| Model | Weights | CTX 16k KV cache | Total | Fits? |
+|---|---|---|---|---|
+| Qwen 9B Q8_0 | ~9 GB | ~1.5 GB | ~12.5 GB | ✅ |
+| Qwen 14B Q4_K_M | ~8 GB | ~2.3 GB | ~12.3 GB | ✅ |
+| LFM2 24B Q8_0 | ~24 GB | ~4 GB | ~30 GB | ❌ OOM |
+| LFM2 24B Q4_K_M | ~13 GB | ~4 GB | ~19 GB | ✅ |
+
+### Adjusting the context
+
+All tuning is done in `.env` — never edit `start-llama.sh` directly:
+
+```env
+LLAMA_CTX=16384   # safe default for coding assistants
+```
+
+Then restart: `./scripts/start-llama.sh restart`
+
 ## 💡 Notes (Troubleshooting)
 
-**If memory gets too full (Sudden crashes):**
-This happens when the "context window" clashes with the machine's physical memory needed for other apps on macOS. Edit the `start-llama.sh` file and cut the context parameter in half:
-- Change ` -c 16384 ` → to ` -c 8192 `
+**If memory gets too full (OOM crashes):**
+Reduce `LLAMA_CTX` first, then `LLAMA_NGL`. Edit `.env`:
+```env
+LLAMA_CTX=8192
+LLAMA_NGL=40
+```
 
 **If word generation is too slow:**
-Add the following *flags* to the execution in the `start-llama.sh` file to give high priority to the threads on your Mac logic board:
-- `--mlock` (Locks the model firmly in RAM and prevents it from swapping to the SSD)
-- `--prio 2` (Guarantees high priority in Mac processor distribution)
+On Apple Silicon, make sure all layers are on the GPU:
+```env
+LLAMA_NGL=99
+```
+You can also try enabling flash attention (`LLAMA_FA=on`) for a speed boost once the model is stable.
 
 **If OpenCode text is black / hard to read on a dark terminal:**
 While running OpenCode, simply type `/theme` and press **Enter** to select a dark-mode friendly theme (like `system`, `tokyonight`, or `one-dark`).
